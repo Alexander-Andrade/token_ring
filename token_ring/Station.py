@@ -9,17 +9,22 @@ class AddrError(Exception):
 
 class Packet:
     '''
-    FI - frame info
-    DA - destination Address
-    SA - source address
+    FI - frame info             - 8 bit                              
+    DA - destination Address    - 6 byte
+    SA - source address         - 6 byte
     M - monitor bit
     A - address recognized bit    
     C - frame-copied bit
     '''
+    # packet = FD + FI + DA + SA + payload + FD
+
     def __init__(self,frame = None):
         self.bitStuffing = bit_stuffing()
         self.hamming = Hamming()
         self.frame = frame
+        self.frameInfoSize = 8 #bit
+        self.addrSize = 6 #byte
+        self.headerSize = 14 # byte
         if not frame:
             self.FI = bitarray(8)
             self.FI.setall(False)
@@ -69,13 +74,13 @@ class Packet:
         payload  = self.hamming.encode(payload)
         # packet = FD + FI + DA + SA + payload + FD
         FD = self.bitStuffing.byteFD
-        packet = FD + self.FI.tobytes() + self.DA.to_bytes(1,byteorder = 'big') + self.SA.to_bytes(1,byteorder = 'big') + payload + FD
+        packet = FD + self.FI.tobytes() + self.DA.to_bytes(self.addrSize,byteorder = 'big') + self.SA.to_bytes(self.addrSize,byteorder = 'big') + payload + FD
         self.frame =  packet
         return self.frame
 
     def repack(self):
         FD = self.bitStuffing.byteFD
-        self.frame = FD + self.FI.tobytes() + self.DA.to_bytes(1,byteorder = 'big') + self.SA.to_bytes(1,byteorder = 'big') + self.frame[4:len(self.frame)-1] + FD
+        self.frame = FD + self.FI.tobytes() + self.DA.to_bytes(self.addrSize,byteorder = 'big') + self.SA.to_bytes(self.addrSize,byteorder = 'big') + self.frame[self.headerSize : len(self.frame)-1] + FD
 
     def extractFrameInfo(self):
         self.FI = bitarray()
@@ -92,6 +97,20 @@ class Packet:
         payload,pBitStuffed = self.bitStuffing.decode(payload)
         return payload
 
+    def addrToBytes(self,addr):
+        #4 + 2 bytes ASCII
+        ip,port = addr
+        str_quartet = ip.split('.')
+        num_quartet = [int(byte) for byte in str_quartet]
+        byte_quartet = [el.to_bytes(1,byteorder='big') for el in num_quartet]
+        num_port = int(port)
+        return b''.join(byte_quartet) + num_port.to_bytes(2,byteorder='big')
+   
+    def addrFromBytes(self,bAddr):
+        int_quartet = list(bAddr[:4])
+        port = int.from_bytes(bAddr[4:],byteorder='big')
+        IP = '.'.join([str(el) for el in int_quartet])
+        return (IP,str(port))
 
 class Station:
    

@@ -1,4 +1,4 @@
-                    import sys  #for COM name
+import sys  #for COM name
 from bitarray import*
 import threading
 from bit_stuffing import bit_stuffing
@@ -116,21 +116,7 @@ class Application(Frame):
         readThread = threading.Thread(target=self.showPortData)
         readThread.start()
         
-  
-def addrToBytes(addr):
-    str_addr_list = addr[0].split('.')
-    int_list = [int(el) for el in str_addr_list]
-    byte_list = [el.to_bytes(2,byteorder='big') for el in int_list]
-    port = int(addr[1])
-    return b''.join(byte_list) + port.to_bytes(2,byteorder='big')
-   
-def addrFromBytes(bAddr):
-    byte_list = splitBytesToList(bAddr,2)
-    int_list = [int.from_bytes(el,byteorder='big') for el in byte_list]
-    IP = '.'.join([str(el) for el in int_list])
-    port = str(byte_list[4])
-    return (PI,port)
-        
+                
 if __name__ == "__main__":
     #root = Tk()
     #app = Application(master=root)
@@ -138,6 +124,8 @@ if __name__ == "__main__":
 
     #st = Station()
     #st.run(1,True,('COM2','COM3'))
-    addr = ("192.168.1.3","6000")
-    by = addrToBytes(addr)
-    newAddr = addrFromBytes(by)
+   
+    frame = b'12345'
+    el = frame[2]
+    print(frame[2])
+    print(frame[1:2])

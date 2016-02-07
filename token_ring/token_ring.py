@@ -13,10 +13,6 @@ class Application(Frame):
         super().__init__(master)
         self.pack()
         self.station = Station()
-        #binds station name and com ports for it
-        self.portsDict = {1 : ('192.168.1.3','6000'),
-                          2 : ('192.168.1.3','7000'),
-                          3 : ('192.168.1.8','6000')} 
         self.__createWidgets()
         self.flPortsOpen = False
 
@@ -36,10 +32,11 @@ class Application(Frame):
         label.grid(column=col,row=line,sticky=anchor)
         return label
 
-    def allocStationAddress(self,col,line,lbl):
+    def allocStationAddress(self,col,line,lbl,text='192.168.1.2 6000'):
         #curent station address
         addr = Entry(self)
         addr.grid(column=col,row=line,sticky='nwes')
+        addr.insert(0,text)
         label = self.allocLabel(col+1,line,lbl)
         return (addr,label)
 
@@ -52,8 +49,8 @@ class Application(Frame):
     def __createWidgets(self):
         self.grid()
         self.curServAddrEntry,self.curLabel = self.allocStationAddress(0,0,'current station')
-        self.nextServAddrEntry,self.nextLabel = self.allocStationAddress(0,1,'next station')
-        self.dstServAddrEntry,self.destLabel = self.allocStationAddress(0,2,'dest station')
+        self.nextServAddrEntry,self.nextLabel = self.allocStationAddress(0,1,'next station','192.168.1.2 6001')
+        self.dstServAddrEntry,self.destLabel = self.allocStationAddress(0,2,'dest station','192.168.1.2 6002')
         #run server button
         self.runServerBut = self.allocButton(0,3,self.openServPortEvent,'run server')
         #connect client to next server button
@@ -74,7 +71,9 @@ class Application(Frame):
 
     def startStationProc(self):
         try:
-            self.station.run(self.curServAddrEntry,self.nextServAddrEntry)
+            curServAddr = self.curServAddrEntry.get().split(' ')
+            nextServAddr = self.nextServAddrEntry.get().split(' ') 
+            self.station.run(curServAddr,nextServAddr,self.monitorChboxVar.get())
             #self.openPortLabel['text'] = 'opened: ' + stationAddr
             #self.flPortsOpen = True
             self.parallelShowPortData()
@@ -118,14 +117,9 @@ class Application(Frame):
         
                 
 if __name__ == "__main__":
-    #root = Tk()
-    #app = Application(master=root)
-    #app.mainloop()
+    root = Tk()
+    app = Application(master=root)
+    app.mainloop()
 
     #st = Station()
     #st.run(1,True,('COM2','COM3'))
-   
-    frame = b'12345'
-    el = frame[2]
-    print(frame[2])
-    print(frame[1:2])

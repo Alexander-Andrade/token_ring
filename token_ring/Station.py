@@ -22,11 +22,18 @@ class Packet:
         self.bitStuffing = bit_stuffing()
         self.hamming = Hamming()
         self.frame = frame
-        self.frameInfoSize = 8 #bit
-        self.addrSize = 6 #byte
-        self.headerSize = 14 # byte
+        self.fi_size = 8 #bit
+        self.addr_size = 6 #byte
+        self.head_size = 21 # byte
+        self.fi_pos =  1
+        self.da_pos = 2
+        self.sa_pos = 8
+        self.payload_pos = 14
+        self.da_addr = None
+        self.sa_addr = None
+
         if not frame:
-            self.FI = bitarray(8)
+            self.FI = bitarray(self.fi_size)
             self.FI.setall(False)
             self.DA = None
             self.SA= None
@@ -65,7 +72,22 @@ class Packet:
     def frameCopied(self,value):
         self.FI[0] = value
 
-   
+    @property
+    def da(self):
+        return self.da_addr
+    @da.setter
+    def da_set(self,addr):
+        self.da_addr = addr
+        self.DA = self.addrToBytes(addr)
+
+    @property
+    def sa(self):
+        return self.sa_addr
+
+    @ sa.setter
+    def sa_set(self,addr):
+        self.sa_addr = addr
+        self.SA = self.addrToBytes(addr)
 
     def pack(self,payload):
         #bit stuffing
@@ -74,23 +96,23 @@ class Packet:
         payload  = self.hamming.encode(payload)
         # packet = FD + FI + DA + SA + payload + FD
         FD = self.bitStuffing.byteFD
-        packet = FD + self.FI.tobytes() + self.DA.to_bytes(self.addrSize,byteorder = 'big') + self.SA.to_bytes(self.addrSize,byteorder = 'big') + payload + FD
+        packet = FD + self.FI.tobytes() + self.DA.to_bytes(self.addr_size,byteorder = 'big') + self.SA.to_bytes(self.addr_size,byteorder = 'big') + payload + FD
         self.frame =  packet
         return self.frame
 
     def repack(self):
         FD = self.bitStuffing.byteFD
-        self.frame = FD + self.FI.tobytes() + self.DA.to_bytes(self.addrSize,byteorder = 'big') + self.SA.to_bytes(self.addrSize,byteorder = 'big') + self.frame[self.headerSize : len(self.frame)-1] + FD
+        self.frame = FD + self.FI.tobytes() + self.DA.to_bytes(self.addr_size,byteorder = 'big') + self.SA.to_bytes(self.addr_size,byteorder = 'big') + self.frame[self.head_size : len(self.frame)-1] + FD
 
     def extractFrameInfo(self):
         self.FI = bitarray()
-        self.FI.frombytes(self.frame[1:2])
-        self.DA = int.from_bytes(self.frame[2:3],byteorder='big')
-        self.SA = int.from_bytes(self.frame[3:4],byteorder='big')
+        self.FI.frombytes(self.frame[ self.fi_pos : self.fi_pos + 1 ])
+        self.DA = int.from_bytes(self.frame[self.da_pos : self.da_pos + self.addr_size], byteorder='big')
+        self.SA = int.from_bytes(self.frame[self.sa_pos : self.sa_pos + self.addr_size], byteorder='big')
 
 
     def unpack(self):
-        payload = self.frame[4 : len(self.frame)-1]
+        payload = self.frame[self.payload_pos : len(self.frame)-1]
         #hemming decode
         payload = self.hamming.decode(bytes(payload))
         #bit stuffing decode
@@ -112,6 +134,7 @@ class Packet:
         IP = '.'.join([str(el) for el in int_quartet])
         return (IP,str(port))
 
+
 class Station:
    
     def __init__(self):
@@ -123,13 +146,7 @@ class Station:
     def run(self,servSock,clientSock,isMonitor):
         self.servSock = servSock
         self.clientSock = clientSock
-        #if combobox is selected as monitor-> true else folse
         self.isMonitor = isMonitor
-        #open ports
-        '''
-        The port is immediately opened on object creation, when a port is given.
-        It is not opened when port is None and a successive call to open() will be needed.
-        '''
 
     def send(self,destAddr,data):
         #station can't send message to self
@@ -139,8 +156,8 @@ class Station:
         #set frame monitor bit
         pack.monitor = self.isMonitor
         #dest address
-        pack.SA = self.servSock.inetAddr
-        pack.DA = destAddr
+        pack.SA = pack.addrToBytes(self.servSock.inetAddr)
+        pack.DA = pack.addrToBytes(destAddr)
         pack.pack(data)
         self.clientSock.send(pack.frame)
 
@@ -149,7 +166,7 @@ class Station:
             #get packet (frame)
             pack = self.receive()
             #if cur station address == destination address
-            if self.servSock.inetAddr == pack.DA:
+            if self.servSock.inetAddr == pack.da:
                 #get packet data
                 payload = self.acceptPacket(pack)
                 if payload is not None:
@@ -163,7 +180,7 @@ class Station:
         #and receiver get data from it
         if not (pack.addrRecognized and pack.frameCopied): 
             #swap DA and SA and send pack to sender
-            pack.DA , pack.SA = pack.SA , pack.DA 
+            pack.da , pack.sa = pack.sa , pack.da 
             #if monitor station, set M bit
             pack.monitor |= self.isMonitor
             #set address_recognized and frame_copied bits
@@ -194,12 +211,12 @@ class Station:
         #finding packet beginning
         byte = None
         while byte != FD:
-             byte = self.servSock.read(1)
+             byte = self.servSock.recv(1)
         #put first FD
         frame.append(byte[0])
         byte = None
         while byte != FD:
-            byte = self.servSock.read(1)
+            byte = self.servSock.recv(1)
             frame.append(byte[0])
         pack.Frame = bytes(frame)
         return pack

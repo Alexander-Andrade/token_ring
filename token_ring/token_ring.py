@@ -5,6 +5,7 @@ from bit_stuffing import bit_stuffing
 from Station import*
 from tkinter import*
 from tkinter.ttk import*    #ovveride tkinter widgets
+from tkinter import messagebox
 from Hamming import Hamming
 
 class Application(Frame):
@@ -14,7 +15,6 @@ class Application(Frame):
         self.pack()
         self.station = Station()
         self.__createWidgets()
-        self.flPortsOpen = False
 
     def __del__(self):
         self.destroy()
@@ -50,7 +50,7 @@ class Application(Frame):
         self.grid()
         self.curServAddrEntry,self.curLabel = self.allocStationAddress(0,0,'current station')
         self.nextServAddrEntry,self.nextLabel = self.allocStationAddress(0,1,'next station','192.168.1.2 6001')
-        self.dstServAddrEntry,self.destLabel = self.allocStationAddress(0,2,'dest station','192.168.1.2 6002')
+        self.dstServAddrEntry,self.destLabel = self.allocStationAddress(0,2,'dest station','192.168.1.2 6001')
         #run server button
         self.runServerBut = self.allocButton(0,3,self.openServPortEvent,'run server')
         #connect client to next server button
@@ -65,61 +65,72 @@ class Application(Frame):
         self.textbox = Text(self,height=12,width=64,font='Arial 8',wrap=WORD)
         self.textbox.focus_set()
         self.textbox.grid(column=0,row=5,columnspan=5)
-        #error Label
-        self.allocLabel(0,12,'no error','w')
         
 
     def startStationProc(self):
         try:
-            curServAddr = self.curServAddrEntry.get().split(' ')
-            nextServAddr = self.nextServAddrEntry.get().split(' ') 
-            self.station.run(curServAddr,nextServAddr,self.monitorChboxVar.get())
+            self.station.run(self.talkSock,self.clientSock,self.servSock.inetAddr,self.monitorChboxVar.get())
             #self.openPortLabel['text'] = 'opened: ' + stationAddr
-            #self.flPortsOpen = True
-            self.parallelShowPortData()
-            self.errorLabel['text'] = 'no errors'
-        except serial.SerialException as e:
-            self.errorLabel['text'] = e 
+            self.flPortsOpen = True
+            self.parallelCatchTransitMesages()
+            self.startBut['state'] = DISABLED
+            self.monitorCheckBox['state'] = DISABLED
+        except (OSError,AttributeError) as e:
+            messagebox.showerror('error',e) 
 
     def connectToNextServEvent(self):
-        IP,port = self.nextServAddrEntry.get().split(' ')
-        self.clientSock = TCP_ClientSockWrapper(IP,port)
+        try:
+            IP,port = self.nextServAddrEntry.get().split(' ')
+            #check address
+            if (IP,port) == self.servSock.inetAddr:
+                raise OSError('it is forbidden to connect to the same station')
+            self.clientSock = TCP_ClientSockWrapper(IP,port)
+            self.connectToNextServBut['state'] = DISABLED
+        except OSError as e:
+           messagebox.showerror('error',e)
 
     def openServPortEvent(self):
         #split to [IP, port]
-        IP,port =  self.curServAddrEntry.get().split(' ')
-        self.servSock = TCP_ServSockWrapper(IP,port)
+        try:
+            IP,port =  self.curServAddrEntry.get().split(' ')
+            self.servSock = TCP_ServSockWrapper(IP,port)
+            self.parallelClientAccept()
+            self.runServerBut['state'] = DISABLED
+        except OSError as e:
+             messagebox.showerror('error',e)
         
     def sendEvent(self):
         try:
-            if not self.flPortsOpen:
-                raise serial.SerialException('ports are close')
             msg = self.textbox.get('1.0',END)
-            self.station.send(int(self.addressCombo.get()),msg.encode('utf-8'))
-            #all is clear
-            self.errorLabel['text'] = 'no errors'
-        except (serial.SerialException, AddrError) as e:
-            self.errorLabel['text'] = e
+            self.station.send( self.dstServAddrEntry.get().split(' ') ,msg.encode('utf-8'))
+        except  (OSError,AddrError) as e:
+            messagebox.showerror('error',e)
         
 
-    def showPortData(self):
+    def catchTransitMesages(self):
         while True:
-            msg = self.station.transit().decode('utf-8')
-            #show
-            self.textbox.delete('1.0',END) 
-            self.textbox.insert('1.0',msg)
-        
+            try:
+                b_msg,sa_addr = self.station.transit()
+                #show
+                self.textbox.delete('1.0',END) 
+                self.textbox.insert('1.0',b_msg.decode('utf-8'))
+            except OSError as e:
+                messagebox.showerror('error',e)
     
 
-    def parallelShowPortData(self):
-        readThread = threading.Thread(target=self.showPortData)
+    def acceptClient(self):
+        sock,addr = self.servSock.raw_sock.accept()
+        self.talkSock = SockWrapper(raw_sock = sock, inetAddr = addr)
+
+    def parallelClientAccept(self):
+        acceptThread = threading.Thread(target=self.acceptClient)
+        acceptThread.start()
+
+    def parallelCatchTransitMesages(self):
+        readThread = threading.Thread(target=self.catchTransitMesages)
         readThread.start()
         
-                
 if __name__ == "__main__":
     root = Tk()
     app = Application(master=root)
     app.mainloop()
-
-    #st = Station()
-    #st.run(1,True,('COM2','COM3'))

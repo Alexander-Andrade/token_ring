@@ -24,7 +24,6 @@ class Packet:
         self.frame = frame
         self.fi_size = 8 #bit
         self.addr_size = 6 #byte
-        self.head_size = 21 # byte
         self.fi_pos =  1
         self.da_pos = 2
         self.sa_pos = 8
@@ -35,8 +34,8 @@ class Packet:
         if not frame:
             self.FI = bitarray(self.fi_size)
             self.FI.setall(False)
-            self.DA = None
-            self.SA= None
+            self.b_DA = None
+            self.b_SA= None
         else:
             self.extractFrameInfo()
 
@@ -76,18 +75,18 @@ class Packet:
     def da(self):
         return self.da_addr
     @da.setter
-    def da_set(self,addr):
+    def da(self,addr):
         self.da_addr = addr
-        self.DA = self.addrToBytes(addr)
+        self.b_DA = self.addrToBytes(addr)
 
     @property
     def sa(self):
         return self.sa_addr
 
-    @ sa.setter
-    def sa_set(self,addr):
+    @sa.setter
+    def sa(self,addr):
         self.sa_addr = addr
-        self.SA = self.addrToBytes(addr)
+        self.b_SA = self.addrToBytes(addr)
 
     def pack(self,payload):
         #bit stuffing
@@ -95,21 +94,22 @@ class Packet:
         #hamming encode
         payload  = self.hamming.encode(payload)
         # packet = FD + FI + DA + SA + payload + FD
-        FD = self.bitStuffing.byteFD
-        packet = FD + self.FI.tobytes() + self.DA.to_bytes(self.addr_size,byteorder = 'big') + self.SA.to_bytes(self.addr_size,byteorder = 'big') + payload + FD
+        b_FD = self.bitStuffing.byteFD
+        packet = b_FD + self.FI.tobytes() + self.b_DA + self.b_SA + payload + b_FD 
         self.frame =  packet
         return self.frame
 
     def repack(self):
-        FD = self.bitStuffing.byteFD
-        self.frame = FD + self.FI.tobytes() + self.DA.to_bytes(self.addr_size,byteorder = 'big') + self.SA.to_bytes(self.addr_size,byteorder = 'big') + self.frame[self.head_size : len(self.frame)-1] + FD
+        b_FD = self.bitStuffing.byteFD
+        self.frame = b_FD + self.FI.tobytes() + self.b_DA + self.b_SA + self.frame[self.payload_pos : len(self.frame)-1] + b_FD
 
     def extractFrameInfo(self):
         self.FI = bitarray()
         self.FI.frombytes(self.frame[ self.fi_pos : self.fi_pos + 1 ])
-        self.DA = int.from_bytes(self.frame[self.da_pos : self.da_pos + self.addr_size], byteorder='big')
-        self.SA = int.from_bytes(self.frame[self.sa_pos : self.sa_pos + self.addr_size], byteorder='big')
-
+        self.b_DA = self.frame[self.da_pos : self.da_pos + self.addr_size]
+        self.b_SA = self.frame[self.sa_pos : self.sa_pos + self.addr_size]
+        self.da_addr = self.addrFromBytes(self.b_DA)
+        self.sa_addr = self.addrFromBytes(self.b_SA)
 
     def unpack(self):
         payload = self.frame[self.payload_pos : len(self.frame)-1]
@@ -139,38 +139,37 @@ class Station:
    
     def __init__(self):
         #ports to communicate with circle
-        self.prevPort = None
-        self.nextPort = None
-        self.isMonitor = False
+        pass
 
-    def run(self,servSock,clientSock,isMonitor):
-        self.servSock = servSock
-        self.clientSock = clientSock
+    def run(self,servTalkSock,clientSock,servAddr,isMonitor):
+        self.servAddr = servAddr
+        self.acceptSock = servTalkSock
+        self.sendSock = clientSock
         self.isMonitor = isMonitor
 
     def send(self,destAddr,data):
         #station can't send message to self
-        if self.servSock.inetAddr == destAddr:
+        if self.servAddr == destAddr:
             raise AddrError('fail to send a message to self')
         pack = Packet()
         #set frame monitor bit
         pack.monitor = self.isMonitor
         #dest address
-        pack.SA = pack.addrToBytes(self.servSock.inetAddr)
-        pack.DA = pack.addrToBytes(destAddr)
+        pack.sa = self.servAddr
+        pack.da = destAddr
         pack.pack(data)
-        self.clientSock.send(pack.frame)
+        self.sendSock.send(pack.frame)
 
     def transit(self):
         while True:
             #get packet (frame)
             pack = self.receive()
             #if cur station address == destination address
-            if self.servSock.inetAddr == pack.da:
+            if self.servAddr == pack.da:
                 #get packet data
-                payload = self.acceptPacket(pack)
-                if payload is not None:
-                    return payload
+                msg_pack = self.acceptPacket(pack)
+                if msg_pack is not None:
+                    return msg_pack 
             else:
                 self.redirectPacket(pack)
 
@@ -180,7 +179,7 @@ class Station:
         #and receiver get data from it
         if not (pack.addrRecognized and pack.frameCopied): 
             #swap DA and SA and send pack to sender
-            pack.da , pack.sa = pack.sa , pack.da 
+            pack.b_DA , pack.b_SA = pack.b_SA , pack.b_DA 
             #if monitor station, set M bit
             pack.monitor |= self.isMonitor
             #set address_recognized and frame_copied bits
@@ -188,20 +187,23 @@ class Station:
             pack.frameCopied = True
             #apply changes
             pack.repack()
-            self.clientSock.send(pack.frame)
-            return pack.unpack()
-        #else destroy packet
+            self.sendSock.send(pack.frame)
+            return (pack.unpack(),pack.sa_addr)
+       #else destroy packet
         else: return None
 
     def redirectPacket(self,pack):
         #if not monitor bit and station is monitor, set it
-        if self.isMonitor and (not pack.monitor):
-            pack.monitor = True
-            self.clientSock.send(pack.frame)
-            #else drop packet
-        else:
-            #if not monitor -> redirect always 
-            self.clientSock.send(pack.frame)
+        if self.isMonitor:
+            #packet pathing throw the monitor
+            if not pack.monitor:
+                pack.monitor = True
+            # second circle of this packet -> destroy it
+            elif pack.monitor:
+                print(str(pack.da_addr) + ' lost packet was destroyed by monitor station ' + str(self.servAddr))
+                return
+        #redirect
+        self.sendSock.send(pack.frame)
 
     def receive(self):
         #read until the FD
@@ -211,12 +213,12 @@ class Station:
         #finding packet beginning
         byte = None
         while byte != FD:
-             byte = self.servSock.recv(1)
+             byte = self.acceptSock.raw_sock.recv(1)
         #put first FD
         frame.append(byte[0])
         byte = None
         while byte != FD:
-            byte = self.servSock.recv(1)
+            byte = self.acceptSock.raw_sock.recv(1)
             frame.append(byte[0])
         pack.Frame = bytes(frame)
         return pack
